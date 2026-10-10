@@ -1,0 +1,19 @@
+{
+  "name": "regfarm",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "可插拔的注册任务框架：通用编排在 lib/，站点流程在 targets/",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "regfarm": "./cli.js"
+  },
+  "scripts": {
+    "start": "node cli.js",
+    "targets": "node cli.js --list",
+    "mailbox": "node lib/mail_providers.js",
+    "test": "node --test"
+  }
+}
