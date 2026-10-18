@@ -202,12 +202,23 @@ export function buildSignupBody(email, password, ref, o = {}) {
  * 成功时 Next 会 303 再吐一整棵 RSC，里面到处是 "error" 字段，不能用裸 /"error":/。
  */
 export function extractSignupError(text) {
-  return /^1:\{"error":"([^"]+)"/m.exec(text)?.[1] ?? null;
+  const err = /^1:\{"error":"([^"]+)"/m.exec(text)?.[1];
+  if (err) return err;
+  // 没 error 字段但要人机：以前被当成 signup 200 成功，随后 /api/keys 401 Sign in first
+  if (/needCaptcha"\s*:\s*true/.test(text) && !/signedIn/.test(text)) return 'needCaptcha';
+  return null;
 }
 
 /** flight 流里的 `"userId": "..."`；没有就返回 ''。 */
 export function extractUserId(text) {
   return /"userId":\s*"([^"]+)"/.exec(text)?.[1] ?? '';
+}
+
+/** 真注册成功：303/redirect，或 body 里有 signedIn / userId。光 HTTP 200 不算。 */
+export function signupOk(status, text, headers = {}) {
+  if (status === 303 || headers['x-action-redirect'] || headers.location) return true;
+  if (extractUserId(text)) return true;
+  return /signedIn/.test(text);
 }
 
 // ======================================================== 业务流程（改这里）
@@ -280,9 +291,8 @@ export async function registerOne(ctx) {
           Referer: signupUrl,
         },
       });
-      // 失败：短 flight（0:{"a":"$@1"} + 1:{"error":...}）。成功：303 或一整棵 dashboard RSC。
-      const actionResult = /^0:\{"a":"\$@1"/.test(r.text);
-      const err = actionResult ? extractSignupError(r.text) : null;
+      // 失败：短 flight（0:{"a":"$@1"} + 1:{"error":...}）。成功必须 303/signedIn/userId。
+      const err = extractSignupError(r.text);
       const redirected =
         r.status === 303 || Boolean(r.headers['x-action-redirect'] || r.headers.location);
       if (err && !redirected) {
@@ -291,6 +301,10 @@ export async function registerOne(ctx) {
           throw new Error(err);
         }
         throw new Error(`signup 403（该 IP 被挡或已用过）: ${err}`);
+      }
+      if (!signupOk(r.status, r.text, r.headers)) {
+        log(`[${idx}] signup resp ${r.status}: ${r.text.slice(0, 240).replace(/\s+/g, ' ')}`);
+        throw new Error(`signup 未登录 HTTP ${r.status}: ${r.text.slice(0, 120).replace(/\s+/g, ' ')}`);
       }
       const userId = extractUserId(r.text);
       log(`[${idx}] signup ok user=${userId.slice(0, 8) || '?'} status=${r.status}`);

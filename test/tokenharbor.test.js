@@ -10,6 +10,7 @@ import {
   parseActionRef,
   extractSignupError,
   extractUserId,
+  signupOk,
   config,
 } from '../targets/tokenharbor.js';
 
@@ -145,6 +146,15 @@ test('extractSignupError: 只认 action 返回行，不误伤 RSC', () => {
     extractSignupError('1:I[195237,["/x.js"],"Loading"]\n3:"$Sreact.fragment"'),
     null,
   );
+  assert.equal(extractSignupError('0:{"a":"$@1"}\n1:{"needCaptcha":true}\n'), 'needCaptcha');
+});
+
+test('signupOk: 200 无会话不算成功', () => {
+  assert.equal(signupOk(200, '0:{"a":"$@1"}\n1:{"needCaptcha":true}'), false);
+  assert.equal(signupOk(200, 'hello'), false);
+  assert.equal(signupOk(303, ''), true);
+  assert.equal(signupOk(200, '{"signedIn":true,"userId":"abc"}'), true);
+  assert.equal(signupOk(200, 'x', { 'x-action-redirect': '/dashboard' }), true);
 });
 
 test('extractUserId: 抠 userId，没有就空串', () => {
