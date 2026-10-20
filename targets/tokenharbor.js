@@ -72,7 +72,7 @@ export const config = {
    * 只列支持 wait_link 的 provider（确认信是链接）。
    * tempmail.lol 对 CN 已经 403（免费档关闭），放最后当兜底。
    */
-  mailPrefer: ['tempmail.lol', 'temp-mail.io'],
+  mailPrefer: ['mail.tm', 'temp-mail.io', 'tempmail.lol'],
 
   /** 注册表单所在路径。登录和注册在同一个路径下，靠 ?mode=signup 区分 */
   signupPath: '/login?mode=signup',
@@ -198,26 +198,40 @@ export function buildSignupBody(email, password, ref, o = {}) {
 }
 
 /**
- * 只认 Server Action 返回行 `1:{"error":"..."}`，以及 no-JS 回包里的 `error&quot;:&quot;...`。
- * 成功时 Next 会 303 再吐一整棵 RSC，里面到处是 "error" 字段，不能用裸 /"error":/。
+ * 只认两种真实的错误形状：
+ *   1. flight 流  `1:{"error":"..."}`
+ *   2. no-JS 回包 `[{&quot;error&quot;:&quot;...&quot;}]`（在 $ACTION_1:1 的 value 里）
+ * 不能宽泛地找 "error"：成功响应的 RSC 里到处是这个词，会抽到垃圾。
  */
 export function extractSignupError(text) {
+  const s = String(text || '');
   const err =
-    /^1:\{"error":"([^"]+)"/m.exec(text)?.[1] ??
-    /error(?:&quot;|\\"|\":)\s*:\s*(?:&quot;|\\")([^"&]+)/.exec(text)?.[1];
-  if (err) return err;
+    /^1:\{"error":"([^"]+)"/m.exec(s)?.[1] ??
+    /\[\{&quot;error&quot;:&quot;([\s\S]*?)&quot;\}\]/.exec(s)?.[1] ??
+    /\[\{"error":"([^"]*?)"\}\]/.exec(s)?.[1];
+  if (err) return err.replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
   // 没 error 字段但要人机：以前被当成 signup 200 成功，随后 /api/keys 401 Sign in first
-  if (/needCaptcha"\s*:\s*true/.test(text) && !/signedIn/.test(text)) return 'needCaptcha';
+  if (/needCaptcha"\s*:\s*true/.test(s) && !/signedIn/.test(s)) return 'needCaptcha';
   return null;
 }
 
 /**
- * 这个 IP 被站点限流了（实测文案）：
+ * 出口 IP 被站点限流/风控。实测四种文案，同一个邮箱域名换干净 IP 就能过：
  *   Too many sign-ups from this network. Please try again in an hour.
- * 命中就把该出口标记冷却一小时，换下一个 IP，别在同一口上重试。
+ *   We couldn't create your account right now. Our team has been alerted…
+ *   Your IP or email provider is not supported for Token Harbor accounts.
+ *   You're doing that a bit fast — take a breath and try again.
+ * 命中就把该出口冷却，换下一个 IP，别在同一口上重试。
+ * 注意区分："not a throwaway address" 是域名黑名单，"already on board" 是邮箱重复，换 IP 都没用。
  */
 export function isIpCooldown(text) {
-  return /too many sign-?ups? from this network|try again in an? hour/i.test(String(text || ''));
+  const s = String(text || '');
+  return (
+    /too many sign-?ups? from this network|try again in an? hour/i.test(s) ||
+    /couldn't create your account right now/i.test(s) ||
+    /ip or email provider is not supported/i.test(s) ||
+    /doing that a bit fast/i.test(s)
+  );
 }
 
 /** flight 流里的 `"userId": "..."`；没有就返回 ''。 */

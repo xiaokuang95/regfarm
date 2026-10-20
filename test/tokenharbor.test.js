@@ -11,6 +11,7 @@ import {
   extractSignupError,
   extractUserId,
   signupOk,
+  isIpCooldown,
   config,
 } from '../targets/tokenharbor.js';
 
@@ -171,4 +172,28 @@ test('config: 邮箱源必须支持 wait_link（确认信是链接）', () => {
     assert.ok(linkCapable.has(name), `${name} 不支持 wait_link`);
   }
   assert.match(config.verifyLinkPattern.source, /tokenharbor/);
+});
+
+test('extractSignupError: no-JS 回包里的错误（含 &#x27; 实体）', () => {
+  const html =
+    '<input type="hidden" name="$ACTION_1:1" value="[{&quot;error&quot;:&quot;You&#x27;re doing that a bit fast — take a breath and try again.&quot;}]"/>';
+  assert.equal(
+    extractSignupError(html),
+    "You're doing that a bit fast — take a breath and try again.",
+  );
+  // 成功页里到处是 "error" 字样，不能抽垃圾
+  assert.equal(extractSignupError('<html>hello signedIn error</html>'), null);
+});
+
+test('isIpCooldown: 限流/风控命中，域名与重复邮箱不命中', () => {
+  for (const s of [
+    'Too many sign-ups from this network. Please try again in an hour.',
+    "We couldn't create your account right now. Our team has been alerted",
+    'Your IP or email provider is not supported for Token Harbor accounts.',
+    "You're doing that a bit fast — take a breath and try again.",
+  ]) {
+    assert.equal(isIpCooldown(s), true, s);
+  }
+  assert.equal(isIpCooldown('Please sign up with a personal or work email, not a throwaway address.'), false);
+  assert.equal(isIpCooldown('This email is already on board — sign in instead.'), false);
 });
