@@ -81,48 +81,47 @@ test('parseActionRef: id 不是 JSON 时报错', () => {
 test('buildSignupBody: 字段名与顺序跟 Python 版一致', () => {
   const names = fields(build().body).map((f) => f.name);
   assert.deepEqual(names, [
-    '1_$ACTION_REF_1',
-    '1_$ACTION_1:0',
-    '1_$ACTION_1:1',
-    '1_$ACTION_KEY',
-    '1_device_fingerprint',
-    '1_timezone',
-    '1_next',
-    '1_email',
-    '1_password',
-    '1_invite_code',
+    '$ACTION_REF_1',
+    '$ACTION_1:0',
+    '$ACTION_1:1',
+    '$ACTION_KEY',
+    'device_fingerprint',
+    'timezone',
+    'next',
+    'email',
+    'password',
+    'invite_code',
     '0',
   ]);
 });
 
 test('buildSignupBody: 空字段也要发（少一个服务端当缺参数）', () => {
   const byName = Object.fromEntries(fields(build().body).map((f) => [f.name, f.value]));
-  assert.equal(byName['1_timezone'], 'Asia/Shanghai');
-  assert.equal(byName['1_next'], '');
-  assert.equal(byName['1_invite_code'], '');
-  assert.equal(byName['1_$ACTION_REF_1'], '');
+  assert.equal(byName['timezone'], 'Asia/Shanghai');
+  assert.equal(byName['next'], '');
+  assert.equal(byName['invite_code'], '');
+  assert.equal(byName['$ACTION_REF_1'], '');
   assert.equal(byName['0'], '["$undefined","$K1"]');
-  assert.equal(byName['1_$ACTION_1:1'], '["$undefined"]');
+  assert.equal(byName['$ACTION_1:1'], '["$undefined"]');
 });
 
 test('buildSignupBody: action 引用原样进 body', () => {
   const byName = Object.fromEntries(fields(build().body).map((f) => [f.name, f.value]));
-  assert.deepEqual(JSON.parse(byName['1_$ACTION_1:0']), { id: ACTION_ID, bound: '$@1' });
-  assert.equal(byName['1_$ACTION_KEY'], ACTION_KEY);
+  assert.deepEqual(JSON.parse(byName['$ACTION_1:0']), { id: ACTION_ID, bound: '$@1' });
+  assert.equal(byName['$ACTION_KEY'], ACTION_KEY);
 });
 
 test('buildSignupBody: email / password / 指纹落在正确字段上', () => {
   const byName = Object.fromEntries(fields(build().body).map((f) => [f.name, f.value]));
-  assert.equal(byName['1_email'], 'a@b.com');
-  assert.equal(byName['1_password'], 'pw!Aa1');
-  assert.equal(byName['1_device_fingerprint'], FINGERPRINT);
+  assert.equal(byName['email'], 'a@b.com');
+  assert.equal(byName['password'], 'pw!Aa1');
+  assert.equal(byName['device_fingerprint'], FINGERPRINT);
 });
 
 test('buildSignupBody: captcha 字段在 0/$K1 之前（放后面 FormData 收不到）', () => {
   const names = fields(build({ captchaToken: 'tok123' }).body).map((f) => f.name);
-  assert.ok(names.includes('1_cf-turnstile-response'));
-  assert.ok(!names.includes('cf-turnstile-response'));
-  assert.ok(names.indexOf('1_cf-turnstile-response') < names.indexOf('0'));
+  assert.ok(names.includes('cf-turnstile-response'));
+  assert.ok(names.indexOf('cf-turnstile-response') < names.indexOf('0'));
 });
 
 test('buildSignupBody: 不传 boundary 时生成 WebKit 形状的随机 boundary', () => {

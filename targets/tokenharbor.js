@@ -72,7 +72,7 @@ export const config = {
    * 只列支持 wait_link 的 provider（确认信是链接）。
    * tempmail.lol 对 CN 已经 403（免费档关闭），放最后当兜底。
    */
-  mailPrefer: ['mail.tm', 'temp-mail.io', 'tempmail.lol'],
+  mailPrefer: ['tempmail.lol', 'temp-mail.io'],
 
   /** 注册表单所在路径。登录和注册在同一个路径下，靠 ?mode=signup 区分 */
   signupPath: '/login?mode=signup',
@@ -179,34 +179,45 @@ export function buildSignupBody(email, password, ref, o = {}) {
   const af = (name, value = '') =>
     parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}`);
 
-  af('1_$ACTION_REF_1');
-  af('1_$ACTION_1:0', ref.actionRef);
-  af('1_$ACTION_1:1', '["$undefined"]');
-  af('1_$ACTION_KEY', ref.actionKey);
-  af('1_device_fingerprint', o.fingerprint || crypto.randomUUID());
-  af('1_timezone', o.timezone || 'Asia/Shanghai');
-  af('1_next');
-  af('1_email', email);
-  af('1_password', password);
-  af('1_invite_code');
+  af('$ACTION_REF_1');
+  af('$ACTION_1:0', ref.actionRef);
+  af('$ACTION_1:1', '["$undefined"]');
+  af('$ACTION_KEY', ref.actionKey);
+  af('device_fingerprint', o.fingerprint || crypto.randomUUID());
+  af('timezone', o.timezone || 'Asia/Shanghai');
+  af('next');
+  af('email', email);
+  af('password', password);
+  af('invite_code');
   // captcha 必须在 `0`（$K1 参数表）之前：放后面 FormData 里就没有这个字段，
   // 站点会回 needCaptcha（token 其实已经拿到了）。
-  if (o.captchaToken) af('1_cf-turnstile-response', o.captchaToken);
+  if (o.captchaToken) af('cf-turnstile-response', o.captchaToken);
   af('0', '["$undefined","$K1"]');
 
   return { body: `${parts.join('\r\n')}\r\n--${boundary}--\r\n`, boundary };
 }
 
 /**
- * 只认 Server Action 返回行 `1:{"error":"..."}`。
+ * 只认 Server Action 返回行 `1:{"error":"..."}`，以及 no-JS 回包里的 `error&quot;:&quot;...`。
  * 成功时 Next 会 303 再吐一整棵 RSC，里面到处是 "error" 字段，不能用裸 /"error":/。
  */
 export function extractSignupError(text) {
-  const err = /^1:\{"error":"([^"]+)"/m.exec(text)?.[1];
+  const err =
+    /^1:\{"error":"([^"]+)"/m.exec(text)?.[1] ??
+    /error(?:&quot;|\\"|\":)\s*:\s*(?:&quot;|\\")([^"&]+)/.exec(text)?.[1];
   if (err) return err;
   // 没 error 字段但要人机：以前被当成 signup 200 成功，随后 /api/keys 401 Sign in first
   if (/needCaptcha"\s*:\s*true/.test(text) && !/signedIn/.test(text)) return 'needCaptcha';
   return null;
+}
+
+/**
+ * 这个 IP 被站点限流了（实测文案）：
+ *   Too many sign-ups from this network. Please try again in an hour.
+ * 命中就把该出口标记冷却一小时，换下一个 IP，别在同一口上重试。
+ */
+export function isIpCooldown(text) {
+  return /too many sign-?ups? from this network|try again in an? hour/i.test(String(text || ''));
 }
 
 /** flight 流里的 `"userId": "..."`；没有就返回 ''。 */
@@ -269,34 +280,37 @@ export async function registerOne(ctx) {
       if (!captchaToken) throw new Error('solver 没返回 token');
       log(`[${idx}] turnstile ok ${captchaToken.slice(0, 12)}…`);
 
-      // 站点先打 /api/auth/signup-precheck?fp= 决定要不要 captcha，指纹要跟表单里的一致
+      // 站点先打 /api/auth/signup-precheck?fp=&email= 决定要不要 captcha，指纹要跟表单里的一致
       const fingerprint = crypto.randomUUID();
       await s.get(`${cfg.baseUrl}/api/auth/signup-precheck`, {
-        params: { fp: fingerprint },
+        params: { fp: fingerprint, email },
         timeout: 15,
       });
 
-      // --- 3. 提交注册（Next.js Server Action）---
+      // --- 3. 提交注册（no-JS 表单路径：字段名无前缀，不带 Next-Action header）---
       const { body, boundary } = buildSignupBody(email, password, ref, { captchaToken, fingerprint });
       const r = await s.post(signupUrl, {
         data: body,
         timeout: 30,
         headers: {
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          Accept: 'text/x-component',
-          'Next-Action': ref.actionId,
-          'Next-Router-State-Tree': ROUTER,
-          'Next-Url': cfg.signupPath,
+          Accept: 'text/html',
           Origin: cfg.baseUrl,
           Referer: signupUrl,
         },
       });
-      // 失败：短 flight（0:{"a":"$@1"} + 1:{"error":...}）。成功必须 303/signedIn/userId。
+      // 失败：短 flight（0:{"a":"$@1"} + 1:{"error":...}）或 no-JS 回包里的 error。
       const err = extractSignupError(r.text);
       const redirected =
         r.status === 303 || Boolean(r.headers['x-action-redirect'] || r.headers.location);
       if (err && !redirected) {
         log(`[${idx}] signup resp ${r.status}: ${r.text.slice(0, 240).replace(/\s+/g, ' ')}`);
+        // IP 被限流：让 runner 冷却这个出口，换下一个 IP。
+        if (isIpCooldown(err) || isIpCooldown(r.text)) {
+          const e = new Error(`ip cooldown: ${err}`);
+          e.ipCooldown = true;
+          throw e;
+        }
         if (/email provider is not supported|couldn't create your account/i.test(err)) {
           throw new Error(err);
         }
