@@ -67,12 +67,18 @@ export const config = {
   userAgent:
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
   outDir: path.join(os.homedir(), 'projects', 'tokenharbor_farm', 'out'),
+  /** 一 IP 一号：出号或限流后冷却一小时 */
+  ipCooldownMs: 60 * 60 * 1000,
 
   /**
-   * 只列支持 wait_link 的 provider（确认信是链接）。
-   * tempmail.lol 对 CN 已经 403（免费档关闭），放最后当兜底。
+   * 只要支持 wait_link 的源（确认信是链接）。
+   * **别把 mail.tm 放前面**：它只有 maxxspace.com 一个域名，建了几百个号后被站点按域名限速，
+   * 实测同一个新 IP 用 maxxspace 报 "doing that a bit fast"，换 ooynib.com 立刻成功。
+   * temp-mail.io 每次轮换多个域名，tempmail.lol 也多家。
    */
-  mailPrefer: ['mail.tm', 'temp-mail.io', 'tempmail.lol'],
+  // 只走微软：temp-mail.io / tempmail.lol / maxxspace 的域名已被站点拉黑，
+  // temp.tf 的 gmail 基础地址也已被注册光。
+  mailPrefer: ['temp.tf-outlook', 'temp.tf-hotmail'],
 
   /** 注册表单所在路径。登录和注册在同一个路径下，靠 ?mode=signup 区分 */
   signupPath: '/login?mode=signup',
@@ -295,13 +301,21 @@ export async function registerOne(ctx) {
       log(`[${idx}] turnstile ok ${captchaToken.slice(0, 12)}…`);
 
       // 站点先打 /api/auth/signup-precheck?fp=&email= 决定要不要 captcha，指纹要跟表单里的一致
+      // 但它只影响前端弹不弹 captcha，失败不该致命（代理抖动很常见）
       const fingerprint = crypto.randomUUID();
-      await s.get(`${cfg.baseUrl}/api/auth/signup-precheck`, {
-        params: { fp: fingerprint, email },
-        timeout: 15,
-      });
+      try {
+        await s.get(`${cfg.baseUrl}/api/auth/signup-precheck`, {
+          params: { fp: fingerprint, email },
+          timeout: 10,
+        });
+      } catch {
+        /* 忽略：拿不到 precheck 也照常提交 */
+      }
 
-      // --- 3. 提交注册（no-JS 表单路径：字段名无前缀，不带 Next-Action header）---
+      // 注意：不要先做「不带 captcha 的探测」。实测探测请求会把邮箱占掉，
+      // 紧接着真实注册就报 already on board（换一个地址也白搭）。
+      // 所以直接带 captcha 打一次。
+      // --- 3b. 提交注册（带 captcha）---
       const { body, boundary } = buildSignupBody(email, password, ref, { captchaToken, fingerprint });
       const r = await s.post(signupUrl, {
         data: body,
@@ -320,10 +334,14 @@ export async function registerOne(ctx) {
       if (err && !redirected) {
         log(`[${idx}] signup resp ${r.status}: ${r.text.slice(0, 240).replace(/\s+/g, ' ')}`);
         // IP 被限流：让 runner 冷却这个出口，换下一个 IP。
-        if (isIpCooldown(err) || isIpCooldown(r.text)) {
+        // 只认提取出的错误文案：整页 r.text 里有 JS 字符串，会误匹配 not supported/couldn't create
+        if (isIpCooldown(err)) {
           const e = new Error(`ip cooldown: ${err}`);
           e.ipCooldown = true;
           throw e;
+        }
+        if (/already on board/i.test(err)) {
+          throw new Error(`email taken: ${err}`);
         }
         if (/email provider is not supported|couldn't create your account/i.test(err)) {
           throw new Error(err);
@@ -334,7 +352,7 @@ export async function registerOne(ctx) {
         log(`[${idx}] signup resp ${r.status}: ${r.text.slice(0, 240).replace(/\s+/g, ' ')}`);
         throw new Error(`signup 未登录 HTTP ${r.status}: ${r.text.slice(0, 120).replace(/\s+/g, ' ')}`);
       }
-      const userId = extractUserId(r.text);
+      let userId = extractUserId(r.text);
       log(`[${idx}] signup ok user=${userId.slice(0, 8) || '?'} status=${r.status}`);
 
       // Next 成功时常走 x-action-redirect 而不是 Location，Session 不会自动跟。
@@ -372,6 +390,18 @@ export async function registerOne(ctx) {
       const apiKey = r3.json().plaintext;
       if (!apiKey) throw new Error('key create 没返回 plaintext');
       log(`[${idx}] api_key=${apiKey.slice(0, 20)}…`);
+      if (!userId) {
+        try {
+          const me = await s.get(`${cfg.baseUrl}/api/me`, {
+            headers: { Accept: 'application/json' },
+            timeout: 15,
+          });
+          const j = me.json();
+          userId = String(j?.id || j?.user?.id || j?.userId || '');
+        } catch {
+          /* 没有 /api/me 就用 email 当 CPA 文件名 */
+        }
+      }
 
       // --- 5. 同意免费模型条款（不点的话 :free 模型会 403）---
       const rc = await s.post(`${cfg.baseUrl}/api/me/privacy`, {
@@ -422,7 +452,12 @@ export function sanitizeUid(uid) {
 }
 
 export function buildCpaAuthFile(res) {
-  const uid = sanitizeUid(res.user_id) || 'tokenharbor';
+  // no-JS 注册经常抠不到 user_id，不能全写成 tokenharbor-tokenharbor.json，否则 CPA 一直覆盖同一份
+  const uid =
+    sanitizeUid(res.user_id) ||
+    sanitizeUid(String(res.email || '').replace(/@/g, '_')) ||
+    sanitizeUid(String(res.api_key || '').replace(/^thk_live_/, '').slice(0, 24)) ||
+    'tokenharbor';
   return {
     fileName: `tokenharbor-${uid}.json`,
     body: {

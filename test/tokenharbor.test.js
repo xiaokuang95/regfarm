@@ -12,6 +12,7 @@ import {
   extractUserId,
   signupOk,
   isIpCooldown,
+  buildCpaAuthFile,
   config,
 } from '../targets/tokenharbor.js';
 
@@ -167,7 +168,14 @@ test('extractUserId: 抠 userId，没有就空串', () => {
 
 test('config: 邮箱源必须支持 wait_link（确认信是链接）', () => {
   // 只有实现了 _iter_messages 的 provider 能用 wait_link，列错了会白等到超时
-  const linkCapable = new Set(['mail.tm', 'tempmail.lol', 'temp-mail.io']);
+  const linkCapable = new Set([
+    'mail.tm',
+    'tempmail.lol',
+    'temp-mail.io',
+    'temp.tf',
+    'temp.tf-outlook',
+    'temp.tf-hotmail',
+  ]);
   for (const name of config.mailPrefer) {
     assert.ok(linkCapable.has(name), `${name} 不支持 wait_link`);
   }
@@ -196,4 +204,21 @@ test('isIpCooldown: 限流/风控命中，域名与重复邮箱不命中', () =>
   }
   assert.equal(isIpCooldown('Please sign up with a personal or work email, not a throwaway address.'), false);
   assert.equal(isIpCooldown('This email is already on board — sign in instead.'), false);
+});
+
+test('buildCpaAuthFile: 没有 user_id 时用 email 当文件名，避免全覆盖同一份', () => {
+  const a = buildCpaAuthFile({
+    email: 'a@maxxspace.com',
+    password: 'x',
+    api_key: 'thk_live_aaa',
+  });
+  const b = buildCpaAuthFile({
+    email: 'b@maxxspace.com',
+    password: 'y',
+    api_key: 'thk_live_bbb',
+  });
+  assert.equal(a.fileName, 'tokenharbor-a_maxxspace_com.json');
+  assert.equal(b.fileName, 'tokenharbor-b_maxxspace_com.json');
+  assert.notEqual(a.fileName, b.fileName);
+  assert.notEqual(a.fileName, 'tokenharbor-tokenharbor.json');
 });
