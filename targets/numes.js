@@ -64,6 +64,9 @@ export const config = {
   /** 确认信是链接，只列实现 _iter_messages（→ wait_link）的 provider */
   mailPrefer: ['mail.tm', 'tempmail.lol', 'temp-mail.io'],
 
+  /** 同 IP 可以连着建号（实测），不用 tokenharbor 那种 1 小时一口一号 */
+  ipCooldownMs: 5 * 60 * 1000,
+
   /** 注册成功后 scp 到这台 CPA 的 auth-dir（.env: CPA_HOST / CPA_DIR） */
   get cpaHost() {
     return process.env.NUMES_CPA_HOST || process.env.CPA_HOST || '';
@@ -157,6 +160,10 @@ export async function registerOne(ctx) {
     try {
       // --- 1. 打开登录页，拿注册链接 ---
       const r1 = await s.get(`${cfg.baseUrl}/auth/login`);
+      if (r1.status === 403) {
+        // 出口被站点拒（数据中心段 / 地区），冷却这个口而不是原地重试三次
+        throw Object.assign(new Error('login page HTTP 403（出口被拒）'), { ipCooldown: true });
+      }
       if (r1.status !== 200) throw new Error(`login page HTTP ${r1.status}`);
       const regUrl = new URL(extractRegistrationPath(r1.text), cfg.authBaseUrl).href;
 
