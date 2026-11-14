@@ -26,6 +26,7 @@ node cli.js --target tokenharbor  --count 1 --proxy-file proxies.txt
 | `top-tools-ai` | top-tools-ai.com | 邮箱 OTP（Clerk） | API key |
 | `alysis-code` | alysiscode.com | 邮件确认链接 + 设备码 | `slk_` 网关 key |
 | `tokenharbor` | tokenharbor.ai | 邮件确认链接 | `thk_live_` API key |
+| `numes` | numes.ai | 邮件确认链接 + 设密码 | `sk-numes-v1-` API key |
 
 `alysis-code` 要点（细节见 `targets/alysis-code.js` 头部注释）：
 
@@ -41,6 +42,16 @@ node cli.js --target tokenharbor  --count 1 --proxy-file proxies.txt
 - 确认邮件里是**链接**，`mailPrefer` 只列支持 `wait_link` 的 provider（mail.tm 排前，tempmail.lol 对 CN 免费档已关）
 - 邮件确认**不是注册成功的前提**：key 先建好，`wait_link` 超时只记 `email_verified:false`，账号照留
 - Turnstile **必过**，走 `captcha.tokents.top`，跟页面共用同一个代理出口
+
+`numes` 要点（细节见 `targets/numes.js` 头部注释）：
+
+- 注册页 Turnstile **action=`register`**；登录页是另一个 Turnstile，密码登录没法纯 HTTP 过，
+  所以这个 target 只注册新号
+- 确认邮件是**链接**，点完还要**设置密码**（required-action），之后才有 `numes_session_*`
+- 建 key 走 BFF：`POST /api/bff/app/v1/accounts/<active_account_id>/keys` + `x-numes-csrf`，
+  这两个值从 `GET /dashboard/keys` 的 SSR 脚本里抠
+- 响应里同时有**掩码标签**（`sk-numes-v1-eddb...b7ec`）和真 key（76 字符），只认后者
+- 产出的 key 用 `GET https://api.numes.ai/api/v1/key` 验活，失败不会 scp 到 CPA
 
 配置在 `targets/<name>.js`（站点、solver、邀请码、邮箱源）。
 用法见 `docs/architecture.md`。

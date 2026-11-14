@@ -18,6 +18,7 @@ targets/
   top-tools-ai.js         注册目标：top-tools-ai.com（邮箱 OTP 型）
   alysis-code.js          注册目标：alysiscode.com（邮件确认链接 + 设备码换 key 型）
   tokenharbor.js          注册目标：tokenharbor.ai（Next.js Server Action + 邮件确认链接型）
+  numes.js                注册目标：numes.ai（Keycloak 表单 + Turnstile + 邮件确认链接）
 reference/                Python 原版（参照实现，不参与运行）
 test/                     离线单测
 docs/                     本目录
@@ -138,6 +139,7 @@ alysiscode.com 的 `device-approve` 就是（用错 action 的 token 会被判
 | `top-tools-ai` | top-tools-ai.com | 邮箱 OTP（Clerk） | API key |
 | `alysis-code` | alysiscode.com | 邮件确认链接 + 设备码 | `slk_` 网关 key |
 | `tokenharbor` | tokenharbor.ai | 邮件确认链接 | `thk_live_` API key |
+| `numes` | numes.ai | 邮件确认链接 + 设密码 | `sk-numes-v1-` API key |
 
 ### alysis-code 要点
 
@@ -197,3 +199,16 @@ http://127.0.0.1:7911
 | `credentials.txt` | `email \| password \| api_key \| created_at` |
 
 两个文件都会 `chmod 600`。
+
+### numes 要点
+
+- **注册和登录是两套 Turnstile**：注册页 action=`register`（求解器能过），登录页那个纯 HTTP 过不去。
+  所以 target 只做注册，不做登录。
+- **邮件链接之后还有一步**：`action-token` 链接打开是 `Choose a password`（required-action），
+  POST 完密码 Keycloak 才 302 回 `numes.ai/auth/callback`，这时才有 `numes_session_*`。
+- **建 key 走 BFF**，不是 REST：
+  `POST /api/bff/app/v1/accounts/<active_account_id>/keys`，头要 `x-numes-csrf`，
+  两个值都在 `GET /dashboard/keys` 的 SSR 脚本里（带 JSON 转义）。
+- **响应里有掩码标签** `sk-numes-v1-eddb...b7ec`，真 key 是 `sk-numes-v1-` + 64 位 hex；
+  `findKey()` 只认完整格式，抓错会把死 key 写进 CPA。
+- key 探活：`GET https://api.numes.ai/api/v1/key`，失败时 `afterSuccess` 拒绝落盘。
