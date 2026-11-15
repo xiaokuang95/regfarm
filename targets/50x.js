@@ -186,6 +186,7 @@ export async function registerOne(ctx) {
         mail_provider: box.provider_name,
         password,
         api_key: apiKey,
+        session,
         key_name: keyName,
         key_alive: alive,
         balance_usd: balance,
@@ -217,6 +218,7 @@ export function buildCpaAuthFile(res) {
         nickname: res.email || uid,
         email: res.email || '',
         password: res.password || '',
+        session: res.session || '',
       },
     },
   };
