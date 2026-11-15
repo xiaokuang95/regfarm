@@ -61,6 +61,7 @@ node cli.js --target tokenharbor  --count 1 --proxy-file proxies.txt
 - 会话头是 `Authorization: Token <session>`；建 key `POST /api/keys {name}` → `api_key`
 - 邮箱域名是**黑名单**（一次性域名 400），outlook/hotmail/gmail/自建域名都过，默认用 temp.tf 微软别名
 - 新号自带 $100 额度，模型 `deepseek-ai/DeepSeek-V4.1-Flash-1017`（1M ctx）
+- **同 IP 每天约 20 个号**：超了回 429 `signup_limit`（"too many accounts created from this network today"），批量要 `--proxy-file`
 
 配置在 `targets/<name>.js`（站点、solver、邀请码、邮箱源）。
 用法见 `docs/architecture.md`。
