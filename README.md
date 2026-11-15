@@ -27,6 +27,7 @@ node cli.js --target tokenharbor  --count 1 --proxy-file proxies.txt
 | `alysis-code` | alysiscode.com | 邮件确认链接 + 设备码 | `slk_` 网关 key |
 | `tokenharbor` | tokenharbor.ai | 邮件确认链接 | `thk_live_` API key |
 | `numes` | numes.ai | 邮件确认链接 + 设密码 | `sk-numes-v1-` API key |
+| `50x` | ai.50x.energy | 邮件确认链接 | `sk-50x-` API key（$100 欢迎额度） |
 
 `alysis-code` 要点（细节见 `targets/alysis-code.js` 头部注释）：
 
@@ -52,6 +53,14 @@ node cli.js --target tokenharbor  --count 1 --proxy-file proxies.txt
   这两个值从 `GET /dashboard/keys` 的 SSR 脚本里抠
 - 响应里同时有**掩码标签**（`sk-numes-v1-eddb...b7ec`）和真 key（76 字符），只认后者
 - 产出的 key 用 `GET https://api.numes.ai/api/v1/key` 验活，失败不会 scp 到 CPA
+
+`50x` 要点（细节见 `targets/50x.js` 头部注释）：
+
+- 注册是纯 JSON API，**没有验证码**：`POST /api/auth/register {email,password}`
+- 确认邮件是**链接**（`?verify=<token>`），`POST /api/auth/verify {token}` 直接返回会话，不用再登录
+- 会话头是 `Authorization: Token <session>`；建 key `POST /api/keys {name}` → `api_key`
+- 邮箱域名是**黑名单**（一次性域名 400），outlook/hotmail/gmail/自建域名都过，默认用 temp.tf 微软别名
+- 新号自带 $100 额度，模型 `deepseek-ai/DeepSeek-V4.1-Flash-1017`（1M ctx）
 
 配置在 `targets/<name>.js`（站点、solver、邀请码、邮箱源）。
 用法见 `docs/architecture.md`。
