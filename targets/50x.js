@@ -6,8 +6,10 @@
  *
  * 实测要点（改之前先看这里）：
  *
- *   1. 注册是纯 JSON API，**没有验证码**：
- *        POST https://api.ai.50x.energy/api/auth/register {"email","password"}
+ *   1. 注册是 JSON API，2026-11 起要 Cloudflare Turnstile：
+ *        POST https://api.ai.50x.energy/api/auth/register {"email","password","captcha"}
+ *      captcha 走 captcha.tokents.top（见 lib/solver.js），sitekey 与登录页同一个。
+ *      **新号余额是 0**（免费额度活动已结束），注册只用于保留链路。
  *        -> 201 {"status":"verification_sent"}
  *
  *   2. 确认邮件是**链接**（不是 OTP）：
@@ -34,6 +36,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { createMailboxPool } from '../lib/mailbox.js';
+import { createSolver } from '../lib/solver.js';
 import { wibNow } from '../lib/util.js';
 
 const execFileAsync = promisify(execFile);
@@ -47,9 +50,9 @@ export const config = {
   /** 推理 API（OpenAI 兼容，key 探活用） */
   inferBaseUrl: 'https://api.ai.50x.energy/v1',
   referral: '',
-  /** 本目标没有验证码；solverUrl/sitekey 只是 runner 要求非空，从不调用 */
+  /** 注册/登录都要 Turnstile；sitekey 与登录页共用，无 action */
   solverUrl: 'https://captcha.tokents.top',
-  sitekey: 'unused',
+  sitekey: '0x4AAAAAAGDX104XP4OHk0Z3',
   userAgent:
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
     '(KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36',
@@ -126,9 +129,11 @@ export async function registerOne(ctx) {
 
     const s = new Session({ proxy, userAgent: cfg.userAgent });
     try {
-      // --- 1. 注册 ---
+      // --- 1. 注册（2026-11 起要 Turnstile）---
+      const solve = createSolver({ solverUrl: cfg.solverUrl, sitekey: cfg.sitekey, log });
+      const captcha = await solve(`${cfg.baseUrl}/signup`, { proxy });
       const r1 = await s.post(`${cfg.apiBaseUrl}/auth/register`, {
-        json: { email, password },
+        json: { email, password, captcha },
         headers: { Origin: cfg.baseUrl, Referer: `${cfg.baseUrl}/signup` },
       });
       if (r1.status >= 400) {
